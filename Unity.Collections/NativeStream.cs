@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.ComponentModel;
 using System.Diagnostics;
 using Unity.Collections.LowLevel.Unsafe;
@@ -46,15 +46,8 @@ namespace Unity.Collections
             where T : struct
         {
             AllocateBlock(out stream, allocator);
-            var jobData = new ConstructJobList<T> { List = forEachCountFromList, Container = stream };
+            var jobData = new ConstructJobList { List = forEachCountFromList.GetUnsafeList(), Container = stream };
             return jobData.Schedule(dependency);
-        }
-
-        [EditorBrowsable(EditorBrowsableState.Never), Obsolete("Please specify the Allocator parameter explicitly. (RemovedAfter 2020-01-29)")]
-        public static JobHandle ScheduleConstruct<T>(out NativeStream stream, NativeList<T> forEachCountFromList, JobHandle dependency)
-            where T : struct
-        {
-            return ScheduleConstruct(out stream, forEachCountFromList, dependency, Allocator.TempJob);
         }
 
         /// <summary>
@@ -69,17 +62,12 @@ namespace Unity.Collections
             return jobData.Schedule(dependency);
         }
 
-        [EditorBrowsable(EditorBrowsableState.Never), Obsolete("Please specify the Allocator parameter explicitly. (RemovedAfter 2020-01-29)")]
-        public static JobHandle ScheduleConstruct(out NativeStream stream, NativeArray<int> lengthFromIndex0, JobHandle dependency)
-        {
-            return ScheduleConstruct(out stream, lengthFromIndex0, dependency, Allocator.TempJob);
-        }
-
         /// <summary>
         /// Reports whether memory for the container is allocated.
         /// </summary>
         /// <value>True if this container object's internal storage has been allocated.</value>
-        /// <remarks>Note that the container storage is not created if you use the default constructor.</remarks>
+        /// <remarks>Note that the container storage is not created if you use the default constructor. You must specify
+        /// at least an allocation type to construct a usable container.</remarks>
         public bool IsCreated => m_Stream.IsCreated;
 
         /// <summary>
@@ -172,17 +160,17 @@ namespace Unity.Collections
         }
 
         [BurstCompile]
-        struct ConstructJobList<T> : IJob
-            where T : struct
+        struct ConstructJobList : IJob
         {
             public NativeStream Container;
 
             [ReadOnly]
-            public NativeList<T> List;
+            [NativeDisableUnsafePtrRestriction]
+            public UnsafeList* List;
 
             public void Execute()
             {
-                Container.AllocateForEach(List.Length);
+                Container.AllocateForEach(List->Length);
             }
         }
 
@@ -346,7 +334,7 @@ namespace Unity.Collections
             /// <typeparam name="T">The type of value.</typeparam>
             public ref T Allocate<T>() where T : struct
             {
-                IsUnmanagedAndThrow<T>();
+                CollectionHelper.CheckIsUnmanaged<T>();
                 int size = UnsafeUtility.SizeOf<T>();
                 return ref UnsafeUtilityEx.AsRef<T>(Allocate(size));
             }
@@ -361,17 +349,6 @@ namespace Unity.Collections
                 return m_Writer.Allocate(size);
             }
 
-            [BurstDiscard]
-            [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
-            static void IsUnmanagedAndThrow<T>() where T : struct
-            {
-                if (!UnsafeUtility.IsUnmanaged<T>())
-                {
-                    throw new ArgumentException($"{typeof(T)} used in BlockStream must be unmanaged (contain no managed types).");
-                }
-            }
-
-            [BurstDiscard]
             [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
             void BeginForEachIndexChecks(int foreachIndex)
             {
@@ -414,7 +391,6 @@ namespace Unity.Collections
 #endif
             }
 
-            [BurstDiscard]
             [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
             void EndForEachIndexChecks()
             {
@@ -428,7 +404,6 @@ namespace Unity.Collections
 #endif
             }
 
-            [BurstDiscard]
             [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
             void AllocateChecks(int size)
             {
@@ -605,7 +580,6 @@ namespace Unity.Collections
                 return m_Reader.ComputeItemCount();
             }
 
-            [BurstDiscard]
             [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
             void CheckAccess()
             {
@@ -614,7 +588,6 @@ namespace Unity.Collections
 #endif
             }
 
-            [BurstDiscard]
             [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
             void ReadChecks(int size)
             {
@@ -629,7 +602,6 @@ namespace Unity.Collections
 #endif
             }
 
-            [BurstDiscard]
             [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
             void BeginForEachIndexChecks(int forEachIndex)
             {
@@ -643,7 +615,6 @@ namespace Unity.Collections
 #endif
             }
 
-            [BurstDiscard]
             [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
             void EndForEachIndexChecks()
             {

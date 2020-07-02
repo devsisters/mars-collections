@@ -1,11 +1,139 @@
 # Change log
 
+## [0.9.0] - 2020-05-25
+
+**This version requires Unity 2019.3.12f1+**
+
+### Added
+
+ * Added `RemoveAt` and `RemoveRange` to list containers in collections. These methods remove
+   elements in a list container while preserving the order of the list. These methods are slower than
+   `Remove*SwapBack` methods and as shuch, you should use `Remove*SwapBack` if you don't want to
+   preserve the order inside `\*List` container.
+
+### Changed
+
+ * Updated package `com.unity.burst` to version `1.3.0-preview.12`.
+
+ ### Removed
+
+* Removed expired APIs for `UnsafeHashMap.Length`
+* Removed expired APIs for `NativeHashMap.Length`
+
+### Fixed
+
+ * Moved `NativeMultiHashMap.Remove<TValueEQ>(TKey key, TValueEq value)` into an extension method and made it Burst compatible
+ * Fixed a bug in `*HashMap.Remove` to not throw when removing from empty hash map.
+
+
+## [0.8.0] - 2020-04-24
+
+### Added
+
+ * Added `Native/UnsafeBitArray.Copy` for copying or shifting bits inside array.
+ * Added `UnsafeAtomicCounter32/64` providing helper interface for atomic counter functionality.
+ * Added `NativeBitArray` providing arbitrary sized bit array functionality with safety mechanism.
+
+### Changed
+
+ * Bumped Burst version to improve compile time and fix multiple bugs.
+
+### Deprecated
+
+ * Deprecated `IJobNativeMultiHashMapMergedSharedKeyIndices`, `JobNativeMultiHashMapUniqueHashExtensions`,
+   `IJobNativeMultiHashMapVisitKeyValue`, `JobNativeMultiHashMapVisitKeyValue`, `IJobNativeMultiHashMapVisitKeyMutableValue`,
+   `JobNativeMultiHashMapVisitKeyMutableValue`, and introduced `NativeHashMap.GetUnsafeBucketData` and
+   `NativeMultiHashMap.GetUnsafeBucketData` to obtain internals to implement deprecated functionality
+   inside user code. If this functionality is used, the best is to copy deprecated code into user code.
+
+### Removed
+
+* Removed expired API `class TerminatesProgramAttribute`
+
+
+## [0.7.1] - 2020-04-08
+
+### Deprecated
+
+ * Deprecated `Length` property from `NativeHashMap`, `UnsafeHashMap`, `NativeMultiHashMap`,
+   `UnsafeMultiHashMap`, `NativeQueue`, and replaced it with `Count()` to reflect that there
+   is computation being done.
+
+### Fixed
+
+ * Fixed an issue where `FixedListDebugView<T>` only existed for IComparable types, which lead to a crash while debugging other types.
+ * Removed code that made NativeStream incompatible with Burst.
+
+
+## [0.7.0] - 2020-03-13
+
+### Added
+
+ * Added ability to dispose NativeKeyValueArrays from job (DisposeJob).
+ * Added `NativeQueue<T>.ToArray` to copy a native queue to an array efficiently
+
+### Changed
+
+ * Upgraded Burst to fix multiple issues and introduced a native debugging feature.
+
+### Deprecated
+
+ * Deprecated `Length` property from `NativeHashMap`, `UnsafeHashMap`, `NativeMultiHashMap`,
+   `UnsafeMultiHashMap`, `NativeQueue`, and replaced it with `Count()` to reflect that there
+   is computation being done.
+
+### Removed
+
+* Removed expired API `CollectionHelper.CeilPow2()`
+* Removed expired API `CollectionHelper.lzcnt()`
+* Removed expired API `struct ResizableArray64Byte<T>`
+
+### Fixed
+
+* Removed code that made `NativeStream` incompatible with Burst.
+
+
+## [0.6.0] - 2020-03-03
+
+### Added
+
+ * Added ability to dispose `UnsafeAppendBuffer` from a `DisposeJob`.
+
+### Changed
+
+ * `UnsafeAppendBuffer` field `Size` renamed to `Length`.
+ * Removed `[BurstDiscard]` from all validation check functions. Validation is present in code compiled with Burst.
+
+### Removed
+
+* Removed expired overloads for `NativeStream.ScheduleConstruct` without explicit allocators.
+
+### Fixed
+
+ * Fixed `UnsafeBitArray` out-of-bounds access.
+
+
+## [0.5.2] - 2020-02-17
+
+### Changed
+
+* Changed `NativeList<T>` parallel reader/writer to match functionality of `UnsafeList` parallel reader/writer.
+* Updated dependencies of this package.
+
+### Removed
+
+* Removed expired API `UnsafeUtilityEx.RestrictNoAlias`
+
+### Fixed
+
+ * Fixed bug in `NativeList.CopyFrom`.
+
 
 ## [0.5.1] - 2020-01-28
 
 ### Changed
 
-* Updated dependencies for this package.
+ * Updated dependencies of this package.
 
 
 ## [0.5.0] - 2020-01-16

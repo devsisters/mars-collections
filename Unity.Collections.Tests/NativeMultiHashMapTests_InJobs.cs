@@ -1,11 +1,13 @@
-﻿using NUnit.Framework;
+using NUnit.Framework;
 using System.Collections.Generic;
 using Unity.Jobs;
+using Unity.Burst;
 using Unity.Collections;
 
-public class NativeMultiHashMapTests_InJobs : NativeMultiHashMapTestsFixture
+internal class NativeMultiHashMapTests_InJobs : NativeMultiHashMapTestsFixture
 {
     [Test]
+    [Ignore("Failing due to editor changes, disabled for now: https://unity3d.atlassian.net/browse/DOTS-1442")]
     public void NativeMultiHashMap_Read_And_Write()
     {
         var hashMap = new NativeMultiHashMap<int, int>(hashMapSize, Allocator.TempJob);
@@ -80,7 +82,7 @@ public class NativeMultiHashMapTests_InJobs : NativeMultiHashMapTestsFixture
                 Assert.AreEqual(1, readValues[i], "Job failed to read from hash map");
             }
         }
-        Assert.AreEqual(hashMapSize - hashMapSize/2, missing.Count, "Wrong indices written to hash map");
+        Assert.AreEqual(hashMapSize - hashMapSize / 2, missing.Count, "Wrong indices written to hash map");
 
         hashMap.Dispose();
         writeStatus.Dispose();
@@ -122,7 +124,8 @@ public class NativeMultiHashMapTests_InJobs : NativeMultiHashMapTestsFixture
         writeStatus.Dispose();
         readValues.Dispose();
     }
-    
+
+    [BurstCompile(CompileSynchronously = true)]
     struct AddMultiIndex : IJobParallelFor
     {
         public NativeMultiHashMap<int, int>.ParallelWriter hashMap;

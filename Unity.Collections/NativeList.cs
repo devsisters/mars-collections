@@ -1,29 +1,46 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Runtime.InteropServices;
-using Unity.Collections.LowLevel.Unsafe;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Threading;
 using Unity.Burst;
+using Unity.Burst.CompilerServices;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
 
 namespace Unity.Collections
 {
+    public interface INativeList<T> where T : struct
+    {
+        int Length { get; set; }
+        int Capacity { get; set; }
+        T this[int index] { get; set; }
+        ref T ElementAt(int index);
+    }
+
     /// <summary>
     /// An unmanaged, resizable list.
     /// </summary>
-    /// <typeparam name="T">The type of the elements in the list.</typeparam>
+    /// <typeparam name="T">The type of the elements in the container.</typeparam>
     [StructLayout(LayoutKind.Sequential)]
     [NativeContainer]
     [DebuggerDisplay("Length = {Length}")]
     [DebuggerTypeProxy(typeof(NativeListDebugView<>))]
-    public unsafe struct NativeList<T> : IEnumerable<T>, IDisposable
+    public unsafe struct NativeList<T> : INativeList<T>, IEnumerable<T>, IDisposable
         where T : struct
     {
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
         internal AtomicSafetyHandle m_Safety;
+#if UNITY_2020_1_OR_NEWER
+        private static readonly SharedStatic<int> s_staticSafetyId = SharedStatic<int>.GetOrCreate<NativeList<T>>();
+        [BurstDiscard]
+        private static void CreateStaticSafetyId()
+        {
+            s_staticSafetyId.Data = AtomicSafetyHandle.NewStaticSafetyId<NativeList<T>>();
+        }
 
+#endif
         [NativeSetClassTypeToNullOnSchedule]
         DisposeSentinel m_DisposeSentinel;
 #endif
@@ -77,6 +94,13 @@ namespace Unity.Collections
                 throw new ArgumentOutOfRangeException(nameof(initialCapacity), $"Capacity * sizeof(T) cannot exceed {int.MaxValue} bytes");
 
             DisposeSentinel.Create(out m_Safety, out m_DisposeSentinel, disposeSentinelStackDepth, allocator);
+#if UNITY_2020_1_OR_NEWER
+            if (s_staticSafetyId.Data == 0)
+            {
+                CreateStaticSafetyId();
+            }
+            AtomicSafetyHandle.SetStaticSafetyId(ref m_Safety, s_staticSafetyId.Data);
+#endif
 #endif
             m_ListData = UnsafeList.Create(UnsafeUtility.SizeOf<T>(), UnsafeUtility.AlignOf<T>(), initialCapacity, allocator);
             m_DeprecatedAllocator = allocator;
@@ -87,7 +111,7 @@ namespace Unity.Collections
         }
 
         /// <summary>
-        /// Retrieve a member of the list by index.
+        /// Retrieve a member of the contaner by index.
         /// </summary>
         /// <param name="index">The zero-based index into the list.</param>
         /// <value>The list item at the specified index.</value>
@@ -98,20 +122,27 @@ namespace Unity.Collections
             {
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
                 AtomicSafetyHandle.CheckReadAndThrow(m_Safety);
-                if ((uint)index >= (uint)m_ListData->Length)
-                    throw new IndexOutOfRangeException($"Index {index} is out of range in NativeList of '{m_ListData->Length}' Length.");
 #endif
-                return UnsafeUtility.ReadArrayElement<T>(m_ListData->Ptr, index);
+                CheckIndexInRange(index, m_ListData->Length);
+                return UnsafeUtility.ReadArrayElement<T>(m_ListData->Ptr, CollectionHelper.AssumePositive(index));
             }
             set
             {
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
                 AtomicSafetyHandle.CheckWriteAndThrow(m_Safety);
-                if ((uint)index >= (uint)m_ListData->Length)
-                    throw new IndexOutOfRangeException($"Index {index} is out of range in NativeList of '{m_ListData->Length}' Length.");
 #endif
-                UnsafeUtility.WriteArrayElement(m_ListData->Ptr, index, value);
+                CheckIndexInRange(index, m_ListData->Length);
+                UnsafeUtility.WriteArrayElement(m_ListData->Ptr, CollectionHelper.AssumePositive(index), value);
             }
+        }
+
+        public ref T ElementAt(int index)
+        {
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+            AtomicSafetyHandle.CheckWriteAndThrow(m_Safety);
+#endif
+            CheckIndexInRange(index, m_ListData->Length);
+            return ref UnsafeUtilityEx.ArrayElementAsRef<T>(m_ListData->Ptr, index);
         }
 
         /// <summary>
@@ -125,7 +156,11 @@ namespace Unity.Collections
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
                 AtomicSafetyHandle.CheckReadAndThrow(m_Safety);
 #endif
-                return m_ListData->Length;
+                return CollectionHelper.AssumePositive(m_ListData->Length);
+            }
+            set
+            {
+                m_ListData->Resize<T>(value, NativeArrayOptions.ClearMemory);
             }
         }
 
@@ -137,7 +172,7 @@ namespace Unity.Collections
         /// to fit more or fewer items. Changing Capacity creates a new array of the specified size, copies the
         /// old array to the new one, and then deallocates the original array memory. You cannot change the Capacity
         /// to a size smaller than <see cref="Length"/> (remove unwanted elements from the list first).</remarks>
-        /// <exception cref="ArgumentException">Thrown if Capacity is set smaller than Length.</exception>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown if Capacity is set smaller than Length.</exception>
         public int Capacity
         {
             get
@@ -145,19 +180,24 @@ namespace Unity.Collections
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
                 AtomicSafetyHandle.CheckReadAndThrow(m_Safety);
 #endif
-                return m_ListData->Capacity;
+                return CollectionHelper.AssumePositive(m_ListData->Capacity);
             }
 
             set
             {
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
                 AtomicSafetyHandle.CheckWriteAndBumpSecondaryVersion(m_Safety);
-                if (value < m_ListData->Length)
-                    throw new ArgumentException("Capacity must be larger than the length of the NativeList.");
 #endif
+                CheckCapacityInRange(value, m_ListData->Length);
                 m_ListData->SetCapacity<T>(value);
             }
         }
+
+        /// <summary>
+        /// Return internal UnsafeList*
+        /// </summary>
+        /// <returns></returns>
+        public UnsafeList* GetUnsafeList() => m_ListData;
 
         /// <summary>
         /// Adds an element to the list.
@@ -178,17 +218,19 @@ namespace Unity.Collections
         /// <summary>
         /// Adds elements from a buffer to this list.
         /// </summary>
-        /// <typeparam name="T">Source type of elements</typeparam>
+        /// <typeparam name="T">Source type of elements.</typeparam>
         /// <param name="ptr">A pointer to the buffer.</param>
         /// <param name="length">The number of elements to add to the list.</param>
         /// <remarks>
         /// If the list has reached its current capacity, internal array won't be resized, and exception will be thrown.
         /// </remarks>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown if length is negative.</exception>
         public void AddRangeNoResize(void* ptr, int length)
         {
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
             AtomicSafetyHandle.CheckWriteAndThrow(m_Safety);
 #endif
+            CheckArgPositive(length);
             m_ListData->AddRangeNoResize<T>(ptr, length);
         }
 
@@ -236,12 +278,14 @@ namespace Unity.Collections
         /// </summary>
         /// <param name="elements">A pointer to the buffer.</param>
         /// <param name="count">The number of elements to add to the list.</param>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown if count is negative.</exception>
         public unsafe void AddRange(void* elements, int count)
         {
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
             AtomicSafetyHandle.CheckWriteAndBumpSecondaryVersion(m_Safety);
 #endif
-            m_ListData->AddRange<T>(elements, count);
+            CheckArgPositive(count);
+            m_ListData->AddRange<T>(elements, CollectionHelper.AssumePositive(count));
         }
 
         /// <summary>
@@ -254,26 +298,71 @@ namespace Unity.Collections
         {
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
             AtomicSafetyHandle.CheckWriteAndBumpSecondaryVersion(m_Safety);
-
-            if (index < 0 || index >= Length)
-                throw new ArgumentOutOfRangeException(index.ToString());
 #endif
-            m_ListData->RemoveAtSwapBack<T>(index);
+            CheckArgInRange(index, Length);
+            m_ListData->RemoveAtSwapBack<T>(CollectionHelper.AssumePositive(index));
         }
 
         /// <summary>
-        /// Reports whether memory for the list is allocated.
+        /// Truncates the list by replacing the item at the specified index range with the items from the end the list. The list
+        /// is shortened by number of elements in range.
         /// </summary>
-        /// <value>True if this list object's internal storage  has been allocated.</value>
-        /// <remarks>Note that the list storage is not created if you use the default constructor. You must specify
-        /// at least an allocation type to construct a usable NativeList.</remarks>
-        public bool IsCreated => m_ListData != null;
-
-        void Deallocate()
+        /// <typeparam name="T">Source type of elements</typeparam>
+        /// <param name="begin">The first index of the item to remove.</param>
+        /// <param name="end">The index past-the-last item to remove.</param>
+        public void RemoveRangeSwapBack(int begin, int end)
         {
-            UnsafeList.Destroy(m_ListData);
-            m_ListData = null;
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+            AtomicSafetyHandle.CheckWriteAndBumpSecondaryVersion(m_Safety);
+#endif
+            m_ListData->RemoveRangeSwapBack<T>(CollectionHelper.AssumePositive(begin), CollectionHelper.AssumePositive(end));
         }
+
+        /// <summary>
+        /// Truncates the list by removing the item at the specified index, and shifting all remaining items to replace removed item. The list
+        /// is shortened by one.
+        /// </summary>
+        /// <typeparam name="T">Source type of elements</typeparam>
+        /// <param name="index">The index of the item to delete.</param>
+        /// <remarks>
+        /// This method of removing item is useful only in case when list is ordered and user wants to preserve order
+        /// in list after removal In majority of cases is not important and user should use more performant `RemoveAtSwapBack`.
+        /// </remarks>
+        public void RemoveAt(int index)
+        {
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+            AtomicSafetyHandle.CheckWriteAndBumpSecondaryVersion(m_Safety);
+#endif
+            CheckArgInRange(index, Length);
+            m_ListData->RemoveAt<T>(CollectionHelper.AssumePositive(index));
+        }
+
+        /// <summary>
+        /// Truncates the list by removing the items at the specified index range, and shifting all remaining items to replace removed items. The list
+        /// is shortened by number of elements in range.
+        /// </summary>
+        /// <typeparam name="T">Source type of elements</typeparam>
+        /// <param name="begin">The first index of the item to remove.</param>
+        /// <param name="end">The index past-the-last item to remove.</param>
+        /// <remarks>
+        /// This method of removing item(s) is useful only in case when list is ordered and user wants to preserve order
+        /// in list after removal In majority of cases is not important and user should use more performant `RemoveRangeSwapBack`.
+        /// </remarks>
+        public void RemoveRange(int begin, int end)
+        {
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+            AtomicSafetyHandle.CheckWriteAndBumpSecondaryVersion(m_Safety);
+#endif
+            m_ListData->RemoveRange<T>(begin, end);
+        }
+
+        /// <summary>
+        /// Reports whether memory for the container is allocated.
+        /// </summary>
+        /// <value>True if this container object's internal storage has been allocated.</value>
+        /// <remarks>Note that the container storage is not created if you use the default constructor. You must specify
+        /// at least an allocation type to construct a usable container.</remarks>
+        public bool IsCreated => m_ListData != null;
 
         /// <summary>
         /// Disposes of this container and deallocates its memory immediately.
@@ -283,7 +372,8 @@ namespace Unity.Collections
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
             DisposeSentinel.Dispose(ref m_Safety, ref m_DisposeSentinel);
 #endif
-            Deallocate();
+            UnsafeList.Destroy(m_ListData);
+            m_ListData = null;
         }
 
         /// <summary>
@@ -294,7 +384,7 @@ namespace Unity.Collections
         /// the [Job.Schedule](https://docs.unity3d.com/ScriptReference/Unity.Jobs.IJobExtensions.Schedule.html)
         /// method using the `jobHandle` parameter so the job scheduler can dispose the container after all jobs
         /// using it have run.</remarks>
-        /// <param name="jobHandle">The job handle or handles for any scheduled jobs that use this container.</param>
+        /// <param name="inputDeps">The job handle or handles for any scheduled jobs that use this container.</param>
         /// <returns>A new job handle containing the prior handles as well as the handle for the job that deletes
         /// the container.</returns>
         public JobHandle Dispose(JobHandle inputDeps)
@@ -305,26 +395,16 @@ namespace Unity.Collections
             // AtomicSafetyHandle can be destroyed after the job was scheduled (Job scheduling
             // will check that no jobs are writing to the container).
             DisposeSentinel.Clear(ref m_DisposeSentinel);
-#endif
-            var jobHandle = new DisposeJob { Container = this }.Schedule(inputDeps);
 
-#if ENABLE_UNITY_COLLECTIONS_CHECKS
+            var jobHandle = new NativeListDisposeJob { Data = new NativeListDispose { m_ListData = m_ListData, m_Safety = m_Safety } }.Schedule(inputDeps);
+
             AtomicSafetyHandle.Release(m_Safety);
+#else
+            var jobHandle = new NativeListDisposeJob { Data = new NativeListDispose { m_ListData = m_ListData } }.Schedule(inputDeps);
 #endif
             m_ListData = null;
 
             return jobHandle;
-        }
-
-        [BurstCompile]
-        struct DisposeJob : IJob
-        {
-            public NativeList<T> Container;
-
-            public void Execute()
-            {
-                Container.Deallocate();
-            }
         }
 
         /// <summary>
@@ -363,8 +443,7 @@ namespace Unity.Collections
             var arraySafety = m_Safety;
             AtomicSafetyHandle.UseSecondaryVersion(ref arraySafety);
 #endif
-
-            var array = NativeArrayUnsafeUtility.ConvertExistingDataToNativeArray<T>(m_ListData->Ptr, m_ListData->Length, Allocator.Invalid);
+            var array = NativeArrayUnsafeUtility.ConvertExistingDataToNativeArray<T>(m_ListData->Ptr, m_ListData->Length, Allocator.None);
 
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
             NativeArrayUnsafeUtility.SetAtomicSafetyHandle(ref array, arraySafety);
@@ -454,12 +533,11 @@ namespace Unity.Collections
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
             AtomicSafetyHandle.CheckExistsAndThrow(m_Safety);
 #endif
-
             byte* buffer = (byte*)m_ListData;
             // We use the first bit of the pointer to infer that the array is in list mode
             // Thus the job scheduling code will need to patch it.
             buffer += 1;
-            var array = NativeArrayUnsafeUtility.ConvertExistingDataToNativeArray<T>(buffer, 0, Allocator.Invalid);
+            var array = NativeArrayUnsafeUtility.ConvertExistingDataToNativeArray<T>(buffer, 0, Allocator.None);
 
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
             NativeArrayUnsafeUtility.SetAtomicSafetyHandle(ref array, m_Safety);
@@ -497,23 +575,27 @@ namespace Unity.Collections
             return new NativeArray<T>.Enumerator(ref array);
         }
 
-        IEnumerator IEnumerable.GetEnumerator() { throw new NotImplementedException(); }
-        IEnumerator<T> IEnumerable<T>.GetEnumerator() { throw new NotImplementedException(); }
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            throw new NotImplementedException();
+        }
 
+        IEnumerator<T> IEnumerable<T>.GetEnumerator()
+        {
+            throw new NotImplementedException();
+        }
 
         /// <summary>
         /// Overwrites this list with the elements of an array.
         /// </summary>
-        /// <remarks>The array to be copied must have a length equal to or greater than the current list.</remarks>
         /// <param name="array">A managed array or
         /// [NativeArray](https://docs.unity3d.com/ScriptReference/Unity.Collections.NativeArray_1.html) to copy
         /// into this list.</param>
         public void CopyFrom(T[] array)
         {
-            //@TODO: Thats not right... This doesn't perform a resize
-            Capacity = array.Length;
-            NativeArray<T> nativeArray = this;
-            nativeArray.CopyFrom(array);
+            Resize(array.Length, NativeArrayOptions.UninitializedMemory);
+            NativeArray<T> na = AsArray();
+            na.CopyFrom(array);
         }
 
         /// <summary>
@@ -531,28 +613,211 @@ namespace Unity.Collections
         }
 
         /// <summary>
-        /// Changes the list length, resizing if necessary, without initializing memory.
+        /// Changes the container length, resizing if necessary, without initializing memory.
         /// </summary>
-        /// <param name="length">The new length of the list.</param>
+        /// <param name="length">The new length of the container.</param>
         public void ResizeUninitialized(int length)
         {
             Resize(length, NativeArrayOptions.UninitializedMemory);
         }
 
-        /// <summary>
-        /// Returns parallel writer instance.
-        /// </summary>
-        public NativeArray<T> AsParallelReader()
-        {
-            return AsArray();
-        }
-
+#if UNITY_2020_1_OR_NEWER
         /// <summary>
         /// Returns parallel reader instance.
         /// </summary>
-        public NativeArray<T> AsParallelWriter()
+        public NativeArray<T>.ReadOnly AsParallelReader()
         {
-            return AsArray();
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+            return new NativeArray<T>.ReadOnly(m_ListData->Ptr, m_ListData->Length, ref m_Safety);
+#else
+            return new NativeArray<T>.ReadOnly(m_ListData->Ptr, m_ListData->Length);
+#endif
+        }
+
+#endif
+
+        /// <summary>
+        /// Returns parallel writer instance.
+        /// </summary>
+        public ParallelWriter AsParallelWriter()
+        {
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+            return new ParallelWriter(m_ListData->Ptr, m_ListData, ref m_Safety);
+#else
+            return new ParallelWriter(m_ListData->Ptr, m_ListData);
+#endif
+        }
+
+        [NativeContainer]
+        [NativeContainerIsAtomicWriteOnly]
+        public unsafe struct ParallelWriter
+        {
+            [NativeDisableUnsafePtrRestriction]
+            public readonly void* Ptr;
+
+            [NativeDisableUnsafePtrRestriction]
+            public UnsafeList* ListData;
+
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+            internal AtomicSafetyHandle m_Safety;
+
+            public unsafe ParallelWriter(void* ptr, UnsafeList* listData, ref AtomicSafetyHandle safety)
+            {
+                Ptr = ptr;
+                ListData = listData;
+                m_Safety = safety;
+            }
+
+#else
+            public unsafe ParallelWriter(void* ptr, UnsafeList* listData)
+            {
+                Ptr = ptr;
+                ListData = listData;
+            }
+
+#endif
+
+            /// <summary>
+            /// Adds an element to the list.
+            /// </summary>
+            /// <typeparam name="T">Source type of elements</typeparam>
+            /// <param name="value">The value to be added at the end of the list.</param>
+            /// <remarks>
+            /// If the list has reached its current capacity, internal array won't be resized, and exception will be thrown.
+            /// </remarks>
+            public void AddNoResize(T value)
+            {
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+                AtomicSafetyHandle.CheckWriteAndThrow(m_Safety);
+#endif
+                var idx = Interlocked.Increment(ref ListData->Length) - 1;
+                CheckSufficientCapacity(ListData->Capacity, idx + 1);
+
+                UnsafeUtility.WriteArrayElement(Ptr, idx, value);
+            }
+
+            private void AddRangeNoResize(int sizeOf, int alignOf, void* ptr, int length)
+            {
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+                AtomicSafetyHandle.CheckWriteAndThrow(m_Safety);
+#endif
+                var idx = Interlocked.Add(ref ListData->Length, length) - length;
+                CheckSufficientCapacity(ListData->Capacity, idx + length);
+
+                void* dst = (byte*)Ptr + idx * sizeOf;
+                UnsafeUtility.MemCpy(dst, ptr, length * sizeOf);
+            }
+
+            /// <summary>
+            /// Adds elements from a buffer to this list.
+            /// </summary>
+            /// <typeparam name="T">Source type of elements</typeparam>
+            /// <param name="ptr">A pointer to the buffer.</param>
+            /// <param name="length">The number of elements to add to the list.</param>
+            /// <remarks>
+            /// If the list has reached its current capacity, internal array won't be resized, and exception will be thrown.
+            /// </remarks>
+            /// <exception cref="ArgumentOutOfRangeException">Thrown if length is negative.</exception>
+            public void AddRangeNoResize(void* ptr, int length)
+            {
+                CheckArgPositive(length);
+                AddRangeNoResize(UnsafeUtility.SizeOf<T>(), UnsafeUtility.AlignOf<T>(), ptr, CollectionHelper.AssumePositive(length));
+            }
+
+            /// <summary>
+            /// Adds elements from a list to this list.
+            /// </summary>
+            /// <typeparam name="T">Source type of elements</typeparam>
+            /// <remarks>
+            /// If the list has reached its current capacity, internal array won't be resized, and exception will be thrown.
+            /// </remarks>
+            public void AddRangeNoResize(UnsafeList list)
+            {
+                AddRangeNoResize(UnsafeUtility.SizeOf<T>(), UnsafeUtility.AlignOf<T>(), list.Ptr, list.Length);
+            }
+
+            /// <summary>
+            /// Adds elements from a list to this list.
+            /// </summary>
+            /// <typeparam name="T">Source type of elements</typeparam>
+            /// <remarks>
+            /// If the list has reached its current capacity, internal array won't be resized, and exception will be thrown.
+            /// </remarks>
+            public void AddRangeNoResize(NativeList<T> list)
+            {
+                AddRangeNoResize(*list.m_ListData);
+            }
+        }
+
+        [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
+        private static void CheckSufficientCapacity(int capacity, int length)
+        {
+            if (capacity < length)
+                throw new Exception($"Length {length} exceeds capacity Capacity {capacity}");
+        }
+
+        [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
+        private static void CheckIndexInRange(int value, int length)
+        {
+            if (value < 0)
+                throw new IndexOutOfRangeException($"Value {value} must be positive.");
+
+            if ((uint)value >= (uint)length)
+                throw new IndexOutOfRangeException($"Value {value} is out of range in NativeList of '{length}' Length.");
+        }
+
+        [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
+        private static void CheckCapacityInRange(int value, int length)
+        {
+            if (value < 0)
+                throw new ArgumentOutOfRangeException($"Value {value} must be positive.");
+
+            if ((uint)value < (uint)length)
+                throw new ArgumentOutOfRangeException($"Value {value} is out of range in NativeList of '{length}' Length.");
+        }
+
+        [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
+        private static void CheckArgInRange(int value, int length)
+        {
+            if (value < 0)
+                throw new ArgumentOutOfRangeException($"Value {value} must be positive.");
+
+            if ((uint)value >= (uint)length)
+                throw new ArgumentOutOfRangeException($"Value {value} is out of range in NativeList of '{length}' Length.");
+        }
+
+        [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
+        private static void CheckArgPositive(int value)
+        {
+            if (value < 0)
+                throw new ArgumentOutOfRangeException($"Value {value} must be positive.");
+        }
+    }
+
+    [NativeContainer]
+    internal unsafe struct NativeListDispose
+    {
+        [NativeDisableUnsafePtrRestriction]
+        public UnsafeList* m_ListData;
+
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+        internal AtomicSafetyHandle m_Safety;
+#endif
+
+        public void Dispose()
+        {
+            UnsafeList.Destroy(m_ListData);
+        }
+    }
+
+    [BurstCompile]
+    internal unsafe struct NativeListDisposeJob : IJob
+    {
+        internal NativeListDispose Data;
+
+        public void Execute()
+        {
+            Data.Dispose();
         }
     }
 
@@ -618,6 +883,7 @@ namespace Unity.Collections.LowLevel.Unsafe
         {
             return list.m_Safety;
         }
+
 #endif
 
         /// <summary>
