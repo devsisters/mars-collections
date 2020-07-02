@@ -1,12 +1,13 @@
-﻿using NUnit.Framework;
+using NUnit.Framework;
 using System;
 using Unity.Jobs;
 using Unity.Collections;
+using Unity.Collections.Tests;
 
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
-public class NativeMultiHashMapTests_JobDebugger : NativeMultiHashMapTestsFixture
+internal class NativeMultiHashMapTests_JobDebugger : NativeMultiHashMapTestsFixture
 {
-    [Test]
+    [Test, DotsRuntimeIgnore]
     public void NativeMultiHashMap_Read_And_Write_Without_Fences()
     {
         var hashMap = new NativeMultiHashMap<int, int>(hashMapSize, Allocator.TempJob);
@@ -28,7 +29,7 @@ public class NativeMultiHashMapTests_JobDebugger : NativeMultiHashMapTestsFixtur
         };
 
         var writeJob = writeData.Schedule(hashMapSize, 1);
-        Assert.Throws<InvalidOperationException> (() => { readData.Schedule(hashMapSize, 1); } );
+        Assert.Throws<InvalidOperationException>(() => { readData.Schedule(hashMapSize, 1); });
         writeJob.Complete();
 
         hashMap.Dispose();

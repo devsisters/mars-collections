@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
@@ -99,7 +99,7 @@ namespace Unity.Collections.LowLevel.Unsafe
             where T : struct
         {
             AllocateBlock(out stream, allocator);
-            var jobData = new ConstructJobList<T> { List = forEachCountFromList, Container = stream };
+            var jobData = new ConstructJobList { List = forEachCountFromList.GetUnsafeList(), Container = stream };
             return jobData.Schedule(dependency);
         }
 
@@ -149,7 +149,8 @@ namespace Unity.Collections.LowLevel.Unsafe
         /// Reports whether memory for the container is allocated.
         /// </summary>
         /// <value>True if this container object's internal storage has been allocated.</value>
-        /// <remarks>Note that the container storage is not created if you use the default constructor.</remarks>
+        /// <remarks>Note that the container storage is not created if you use the default constructor. You must specify
+        /// at least an allocation type to construct a usable container.</remarks>
         public bool IsCreated => m_Block != null;
 
         /// <summary>
@@ -237,7 +238,7 @@ namespace Unity.Collections.LowLevel.Unsafe
             UnsafeUtility.Free(m_Block->Ranges, m_Allocator);
             UnsafeUtility.Free(m_Block, m_Allocator);
             m_Block = null;
-            m_Allocator = Allocator.Invalid;
+            m_Allocator = Allocator.None;
         }
 
         /// <summary>
@@ -280,17 +281,17 @@ namespace Unity.Collections.LowLevel.Unsafe
         }
 
         [BurstCompile]
-        struct ConstructJobList<T> : IJob
-            where T : struct
+        struct ConstructJobList : IJob
         {
             public UnsafeStream Container;
 
             [ReadOnly]
-            public NativeList<T> List;
+            [NativeDisableUnsafePtrRestriction]
+            public UnsafeList* List;
 
             public void Execute()
             {
-                Container.AllocateForEach(List.Length);
+                Container.AllocateForEach(List->Length);
             }
         }
 

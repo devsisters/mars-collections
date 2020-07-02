@@ -1,8 +1,8 @@
-﻿using System;
+using System;
 using NUnit.Framework;
 using Unity.Collections;
 
-public class BitFieldTests
+internal class BitFieldTests
 {
     [Test]
     public void BitField32_Get_Set()
@@ -72,13 +72,12 @@ public class BitFieldTests
 
         for (byte i = 0; i < 32; ++i)
         {
-            Assert.DoesNotThrow(() => { test.GetBits(i, (byte)(32-i)); });
+            Assert.DoesNotThrow(() => { test.GetBits(i, (byte)(32 - i)); });
         }
 
         Assert.Throws<ArgumentException>(() => { test.GetBits(0, 33); });
         Assert.Throws<ArgumentException>(() => { test.GetBits(1, 32); });
     }
-
 
     [Test]
     public void BitField64_Get_Set()

@@ -1,12 +1,15 @@
-﻿using NUnit.Framework;
+using NUnit.Framework;
 using System;
+using Unity.Burst;
 using Unity.Collections;
 using Unity.Collections.Tests;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
+#if !UNITY_DOTSPLAYER
 using Unity.PerformanceTesting;
+#endif
 
-public class UnsafeListTests
+internal class UnsafeListTests
 {
     [Test]
     public unsafe void UnsafeList_Init_ClearMemory()
@@ -156,10 +159,10 @@ public class UnsafeListTests
         // List's capacity is always cache-line aligned, number of items fills up whole cache-line.
         int[] range = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 };
 
-        Assert.Throws<Exception>(() => { fixed (int* r = range) list.AddRangeNoResize<int>(r, 17); });
+        Assert.Throws<Exception>(() => { fixed(int* r = range) list.AddRangeNoResize<int>(r, 17); });
 
         list.SetCapacity<int>(17);
-        Assert.DoesNotThrow(() => { fixed (int* r = range) list.AddRangeNoResize<int>(r, 17); });
+        Assert.DoesNotThrow(() => { fixed(int* r = range) list.AddRangeNoResize<int>(r, 17); });
 
         list.SetCapacity<int>(16);
         Assert.Throws<Exception>(() => { list.AddNoResize(16); });
@@ -176,7 +179,7 @@ public class UnsafeListTests
         list.AddNoResize(6);
         list.AddNoResize(4);
         list.AddNoResize(9);
-        Expected(ref list, 4, new int[]{ 4, 6, 4, 9 });
+        Expected(ref list, 4, new int[] { 4, 6, 4, 9 });
 
         list.Dispose();
     }
@@ -192,13 +195,13 @@ public class UnsafeListTests
         int[] range = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
 
         // test removing from the end
-        fixed (int* r = range) list.AddRange<int>(r, 10);
-        list.RemoveAtSwapBack<int>(list.Length-1);
+        fixed(int* r = range) list.AddRange<int>(r, 10);
+        list.RemoveAtSwapBack<int>(list.Length - 1);
         Expected(ref list, 9, new int[] { 0, 1, 2, 3, 4, 5, 6, 7, 8 });
         list.Clear();
 
         // test removing from the end
-        fixed (int* r = range) list.AddRange<int>(r, 10);
+        fixed(int* r = range) list.AddRange<int>(r, 10);
         list.RemoveAtSwapBack<int>(5);
         Expected(ref list, 9, new int[] { 0, 1, 2, 3, 4, 9, 6, 7, 8 });
         list.Clear();
@@ -217,34 +220,134 @@ public class UnsafeListTests
         int[] range = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
 
         // test removing from the end
-        fixed (int* r = range) list.AddRange<int>(r, 10);
+        fixed(int* r = range) list.AddRange<int>(r, 10);
         list.RemoveRangeSwapBack<int>(6, 9);
-        Expected(ref list, 7, new int[]{ 0, 1, 2, 3, 4, 5, 9 });
+        Expected(ref list, 7, new int[] { 0, 1, 2, 3, 4, 5, 9 });
         list.Clear();
 
         // test removing all but one
-        fixed (int* r = range) list.AddRange<int>(r, 10);
+        fixed(int* r = range) list.AddRange<int>(r, 10);
         list.RemoveRangeSwapBack<int>(0, 9);
         Expected(ref list, 1, new int[] { 9 });
         list.Clear();
 
         // test removing from the front
-        fixed (int* r = range) list.AddRange<int>(r, 10);
+        fixed(int* r = range) list.AddRange<int>(r, 10);
         list.RemoveRangeSwapBack<int>(0, 3);
         Expected(ref list, 7, new int[] { 7, 8, 9, 3, 4, 5, 6 });
         list.Clear();
 
         // test removing from the middle
-        fixed (int* r = range) list.AddRange<int>(r, 10);
+        fixed(int* r = range) list.AddRange<int>(r, 10);
         list.RemoveRangeSwapBack<int>(0, 3);
         Expected(ref list, 7, new int[] { 7, 8, 9, 3, 4, 5, 6 });
         list.Clear();
 
         // test removing whole range
-        fixed (int* r = range) list.AddRange<int>(r, 10);
+        fixed(int* r = range) list.AddRange<int>(r, 10);
         list.RemoveRangeSwapBack<int>(0, 10);
         Expected(ref list, 0, new int[] { 0 });
         list.Clear();
+
+        list.Dispose();
+    }
+
+    [Test]
+    public unsafe void UnsafeList_RemoveAt()
+    {
+        var sizeOf = UnsafeUtility.SizeOf<int>();
+        var alignOf = UnsafeUtility.AlignOf<int>();
+
+        UnsafeList list = new UnsafeList(sizeOf, alignOf, 10, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+
+        int[] range = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+
+        // test removing from the end
+        fixed (int* r = range) list.AddRange<int>(r, 10);
+        list.RemoveAt<int>(list.Length - 1);
+        Expected(ref list, 9, new int[] { 0, 1, 2, 3, 4, 5, 6, 7, 8 });
+        list.Clear();
+
+        // test removing from the end
+        fixed (int* r = range) list.AddRange<int>(r, 10);
+        list.RemoveAt<int>(5);
+        Expected(ref list, 9, new int[] { 0, 1, 2, 3, 4, 6, 7, 8, 9 });
+        list.Clear();
+
+        list.Dispose();
+    }
+
+    [Test]
+    public unsafe void UnsafeList_RemoveRange()
+    {
+        var sizeOf = UnsafeUtility.SizeOf<int>();
+        var alignOf = UnsafeUtility.AlignOf<int>();
+
+        UnsafeList list = new UnsafeList(sizeOf, alignOf, 10, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+
+        int[] range = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+
+        // test removing from the end
+        fixed (int* r = range) list.AddRange<int>(r, 10);
+        list.RemoveRange<int>(6, 9);
+        Expected(ref list, 7, new int[] { 0, 1, 2, 3, 4, 5, 9 });
+        list.Clear();
+
+        // test removing all but one
+        fixed (int* r = range) list.AddRange<int>(r, 10);
+        list.RemoveRange<int>(0, 9);
+        Expected(ref list, 1, new int[] { 9 });
+        list.Clear();
+
+        // test removing from the front
+        fixed (int* r = range) list.AddRange<int>(r, 10);
+        list.RemoveRange<int>(0, 3);
+        Expected(ref list, 7, new int[] { 3, 4, 5, 6, 7, 8, 9 });
+        list.Clear();
+
+        // test removing from the middle
+        fixed (int* r = range) list.AddRange<int>(r, 10);
+        list.RemoveRange<int>(0, 3);
+        Expected(ref list, 7, new int[] { 3, 4, 5, 6, 7, 8, 9 });
+        list.Clear();
+
+        // test removing whole range
+        fixed (int* r = range) list.AddRange<int>(r, 10);
+        list.RemoveRange<int>(0, 10);
+        Expected(ref list, 0, new int[] { 0 });
+        list.Clear();
+
+        list.Dispose();
+    }
+
+    [Test]
+    public unsafe void UnsafeList_Remove_Throws()
+    {
+        var sizeOf = UnsafeUtility.SizeOf<int>();
+        var alignOf = UnsafeUtility.AlignOf<int>();
+
+        UnsafeList list = new UnsafeList(sizeOf, alignOf, 10, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+
+        int[] range = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+        fixed (int* r = range) list.AddRange<int>(r, 10);
+
+        Assert.Throws<ArgumentException>(() => { list.RemoveAt<int>(100); });
+        Assert.AreEqual(10, list.Length);
+
+        Assert.Throws<ArgumentException>(() => { list.RemoveAtSwapBack<int>(100); });
+        Assert.AreEqual(10, list.Length);
+
+        Assert.Throws<ArgumentException>(() => { list.RemoveRange<int>(0, 100); });
+        Assert.AreEqual(10, list.Length);
+
+        Assert.Throws<ArgumentException>(() => { list.RemoveRangeSwapBack<int>(0, 100); });
+        Assert.AreEqual(10, list.Length);
+
+        Assert.Throws<ArgumentException>(() => { list.RemoveRange<int>(100, 0);  });
+        Assert.AreEqual(10, list.Length);
+
+        Assert.Throws<ArgumentException>(() => { list.RemoveRangeSwapBack<int>(100, 0); });
+        Assert.AreEqual(10, list.Length);
 
         list.Dispose();
     }
@@ -258,7 +361,7 @@ public class UnsafeListTests
         var list = new UnsafeList(sizeOf, alignOf, 10, Allocator.Persistent, NativeArrayOptions.ClearMemory);
 
         int[] range = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
-        fixed (int* r = range) list.AddRange<int>(r, 10);
+        fixed(int* r = range) list.AddRange<int>(r, 10);
 
         var listView = new UnsafeList((int*)list.Ptr + 4, 2);
         Expected(ref listView, 2, new int[] { 4, 5 });
@@ -267,6 +370,8 @@ public class UnsafeListTests
         list.Dispose();
     }
 
+    // Burst error BC1071: Unsupported assert type
+    // [BurstCompile(CompileSynchronously = true)]
     struct UnsafeListParallelReader : IJob
     {
         public UnsafeList.ParallelReader list;
@@ -294,6 +399,7 @@ public class UnsafeListTests
         list.Dispose(job.Schedule()).Complete();
     }
 
+    [BurstCompile(CompileSynchronously = true)]
     struct UnsafeListParallelWriter : IJobParallelFor
     {
         public UnsafeList.ParallelWriter list;
@@ -335,6 +441,7 @@ public class UnsafeListTests
         list.Dispose();
     }
 
+#if !UNITY_DOTSPLAYER
     [Test, Performance]
     [Category("Performance")]
     public void UnsafeList_Performance_Add()
@@ -346,19 +453,21 @@ public class UnsafeListTests
         var list = new UnsafeList(sizeOf, alignOf, 1, Allocator.Persistent, NativeArrayOptions.ClearMemory);
 
         Measure.Method(() =>
+        {
+            list.SetCapacity<int>(1);
+            for (int i = 0; i < numElements; ++i)
             {
-                list.SetCapacity<int>(1);
-                for (int i = 0; i < numElements; ++i)
-                {
-                    list.Add(i);
-                }
-            })
+                list.Add(i);
+            }
+        })
             .WarmupCount(100)
             .MeasurementCount(1000)
             .Run();
 
         list.Dispose();
     }
+
+#endif
 
     [Test]
     public unsafe void UnsafeListT_IndexOf()

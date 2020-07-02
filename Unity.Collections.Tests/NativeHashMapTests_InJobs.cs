@@ -1,9 +1,12 @@
-﻿using NUnit.Framework;
+using NUnit.Framework;
+using System;
 using System.Collections.Generic;
 using Unity.Jobs;
+using Unity.Burst;
 using Unity.Collections;
+using Unity.Collections.Tests;
 
-public class NativeHashMapTests_InJobs : NativeHashMapTestsFixture
+internal class NativeHashMapTests_InJobs : NativeHashMapTestsFixture
 {
     [Test]
     public void NativeHashMap_Read_And_Write()
@@ -133,6 +136,7 @@ public class NativeHashMapTests_InJobs : NativeHashMapTestsFixture
         readValues.Dispose();
     }
 
+    [BurstCompile(CompileSynchronously = true)]
     struct Clear : IJob
     {
         public NativeHashMap<int, int> hashMap;
@@ -146,7 +150,7 @@ public class NativeHashMapTests_InJobs : NativeHashMapTestsFixture
     [Test]
     public void NativeHashMap_Clear_And_Write()
     {
-        var hashMap = new NativeHashMap<int, int>(hashMapSize/2, Allocator.TempJob);
+        var hashMap = new NativeHashMap<int, int>(hashMapSize / 2, Allocator.TempJob);
         var writeStatus = new NativeArray<int>(hashMapSize, Allocator.TempJob);
 
         var clearJob = new Clear
@@ -170,7 +174,53 @@ public class NativeHashMapTests_InJobs : NativeHashMapTestsFixture
         hashMap.Dispose();
     }
 
+    [Test]
+    public void NativeHashMap_DisposeJob()
+    {
+        var container0 = new NativeHashMap<int, int>(1, Allocator.Persistent);
+        Assert.True(container0.IsCreated);
+        Assert.DoesNotThrow(() => { container0.Add(0, 1); });
+        Assert.True(container0.ContainsKey(0));
+
+        var container1 = new NativeMultiHashMap<int, int>(1, Allocator.Persistent);
+        Assert.True(container1.IsCreated);
+        Assert.DoesNotThrow(() => { container1.Add(1, 2); });
+        Assert.True(container1.ContainsKey(1));
+
+        var disposeJob0 = container0.Dispose(default);
+        Assert.False(container0.IsCreated);
+        Assert.Throws<InvalidOperationException>(() => { container0.ContainsKey(0); });
+
+        var disposeJob = container1.Dispose(disposeJob0);
+        Assert.False(container1.IsCreated);
+        Assert.Throws<InvalidOperationException>(() => { container1.ContainsKey(1); });
+
+        disposeJob.Complete();
+    }
+
+    [Test, DotsRuntimeIgnore]
+    public void NativeHashMap_DisposeJobWithMissingDependencyThrows()
+    {
+        var hashMap = new NativeHashMap<int, int>(hashMapSize / 2, Allocator.TempJob);
+        var deps = new Clear { hashMap = hashMap }.Schedule();
+        Assert.Throws<InvalidOperationException>(() => { hashMap.Dispose(default); });
+        deps.Complete();
+        hashMap.Dispose();
+    }
+
+    [Test, DotsRuntimeIgnore]
+    public void NativeHashMap_DisposeJobCantBeScheduled()
+    {
+        var hashMap = new NativeHashMap<int, int>(hashMapSize / 2, Allocator.TempJob);
+        var deps = hashMap.Dispose(default);
+        Assert.Throws<InvalidOperationException>(() => { new Clear { hashMap = hashMap }.Schedule(deps); });
+        deps.Complete();
+    }
+
+    [BurstCompile(CompileSynchronously = true)]
+#pragma warning disable 618 // RemovedAfter 2020-07-07
     struct MergeSharedValues : IJobNativeMultiHashMapMergedSharedKeyIndices
+#pragma warning restore 618 // RemovedAfter 2020-07-07
     {
         [NativeDisableParallelForRestriction]
         public NativeArray<int> sharedCount;
@@ -195,14 +245,14 @@ public class NativeHashMapTests_InJobs : NativeHashMapTestsFixture
     {
         var count = 1024;
         var sharedKeyCount = 16;
-        var sharedCount = new NativeArray<int>(count,Allocator.TempJob);
-        var sharedIndices = new NativeArray<int>(count,Allocator.TempJob);
-        var totalSharedCount = new NativeArray<int>(1,Allocator.TempJob);
-        var hashMap = new NativeMultiHashMap<int,int>(count,Allocator.TempJob);
+        var sharedCount = new NativeArray<int>(count, Allocator.TempJob);
+        var sharedIndices = new NativeArray<int>(count, Allocator.TempJob);
+        var totalSharedCount = new NativeArray<int>(1, Allocator.TempJob);
+        var hashMap = new NativeMultiHashMap<int, int>(count, Allocator.TempJob);
 
         for (int i = 0; i < count; i++)
         {
-            hashMap.Add(i&(sharedKeyCount-1),i);
+            hashMap.Add(i & (sharedKeyCount - 1), i);
             sharedCount[i] = 1;
         }
 
@@ -217,7 +267,7 @@ public class NativeHashMapTests_InJobs : NativeHashMapTestsFixture
 
         for (int i = 0; i < count; i++)
         {
-            Assert.AreEqual(count/sharedKeyCount,sharedCount[sharedIndices[i]]);
+            Assert.AreEqual(count / sharedKeyCount, sharedCount[sharedIndices[i]]);
         }
 
         sharedCount.Dispose();

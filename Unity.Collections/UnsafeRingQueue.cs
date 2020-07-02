@@ -1,6 +1,5 @@
-﻿using System;
+using System;
 using System.Diagnostics;
-using Unity.Burst;
 using Unity.Jobs;
 using Unity.Mathematics;
 
@@ -79,15 +78,21 @@ namespace Unity.Collections.LowLevel.Unsafe
     /// <summary>
     /// Fixed-size circular buffer.
     /// </summary>
-    /// <typeparam name="T"></typeparam>
+    /// <typeparam name="T">Source type of elements.</typeparam>
     [DebuggerDisplay("Length = {Length}, Capacity = {Capacity}, IsCreated = {IsCreated}")]
     [DebuggerTypeProxy(typeof(UnsafeRingQueueDebugView<>))]
     public unsafe struct UnsafeRingQueue<T> : IDisposable
         where T : unmanaged
     {
+        /// <summary>
+        /// </summary>
         [NativeDisableUnsafePtrRestriction]
         public T* Ptr;
+
+        /// <summary>
+        /// </summary>
         public Allocator Allocator;
+
         internal RingControl Control;
 
         /// <summary>
@@ -108,7 +113,7 @@ namespace Unity.Collections.LowLevel.Unsafe
         public UnsafeRingQueue(T* ptr, int capacity)
         {
             Ptr = ptr;
-            Allocator = Allocator.Invalid;
+            Allocator = Allocator.None;
             Control = new RingControl(capacity);
         }
 
@@ -147,7 +152,7 @@ namespace Unity.Collections.LowLevel.Unsafe
         /// </summary>
         public void Dispose()
         {
-            if (Allocator != Allocator.Invalid)
+            if (CollectionHelper.ShouldDeallocate(Allocator))
             {
                 UnsafeUtility.Free(Ptr, Allocator);
                 Allocator = Allocator.Invalid;
@@ -164,14 +169,14 @@ namespace Unity.Collections.LowLevel.Unsafe
         /// the [Job.Schedule](https://docs.unity3d.com/ScriptReference/Unity.Jobs.IJobExtensions.Schedule.html)
         /// method using the `jobHandle` parameter so the job scheduler can dispose the container after all jobs
         /// using it have run.</remarks>
-        /// <param name="jobHandle">The job handle or handles for any scheduled jobs that use this container.</param>
+        /// <param name="inputDeps">The job handle or handles for any scheduled jobs that use this container.</param>
         /// <returns>A new job handle containing the prior handles as well as the handle for the job that deletes
         /// the container.</returns>
         public JobHandle Dispose(JobHandle inputDeps)
         {
-            if (Allocator != Allocator.Invalid)
+            if (CollectionHelper.ShouldDeallocate(Allocator))
             {
-                var jobHandle = new DisposeJob { Ptr = Ptr, Allocator = Allocator }.Schedule(inputDeps);
+                var jobHandle = new UnsafeDisposeJob { Ptr = Ptr, Allocator = Allocator }.Schedule(inputDeps);
 
                 Ptr = null;
                 Allocator = Allocator.Invalid;
@@ -181,20 +186,7 @@ namespace Unity.Collections.LowLevel.Unsafe
 
             Ptr = null;
 
-            return default;
-        }
-
-        [BurstCompile]
-        struct DisposeJob : IJob
-        {
-            [NativeDisableUnsafePtrRestriction]
-            public void* Ptr;
-            public Allocator Allocator;
-
-            public void Execute()
-            {
-                UnsafeUtility.Free(Ptr, Allocator);
-            }
+            return inputDeps;
         }
 
         /// <summary>

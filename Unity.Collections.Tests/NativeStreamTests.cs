@@ -1,11 +1,14 @@
-﻿using System;
+using System;
 using NUnit.Framework;
+using Unity.Burst;
 using Unity.Collections;
+using Unity.Collections.Tests;
 using Unity.Jobs;
 using UnityEngine;
 
-public class NativeStreamTests
+internal class NativeStreamTests
 {
+    [BurstCompile(CompileSynchronously = true)]
     struct WriteInts : IJobParallelFor
     {
         public NativeStream.Writer Writer;
@@ -19,6 +22,7 @@ public class NativeStreamTests
         }
     }
 
+    [BurstCompile(CompileSynchronously = true)]
     struct ReadInts : IJobParallelFor
     {
         public NativeStream.Reader Reader;
@@ -123,7 +127,7 @@ public class NativeStreamTests
     }
 
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
-    [Test]
+    [Test, DotsRuntimeIgnore]
     public void ParallelWriteThrows()
     {
         var stream = new NativeStream(100, Allocator.TempJob);
@@ -136,7 +140,7 @@ public class NativeStreamTests
         stream.Dispose();
     }
 
-    [Test]
+    [Test, DotsRuntimeIgnore]
     public void ScheduleCreateThrows()
     {
         var list = new NativeList<int>(Allocator.Persistent);
@@ -199,7 +203,7 @@ public class NativeStreamTests
 
         stream.Dispose();
     }
-    
+
     [Test]
     public void UnbalancedBeginThrows()
     {
@@ -207,7 +211,7 @@ public class NativeStreamTests
         var writer = stream.AsWriter();
         writer.BeginForEachIndex(0);
         // Missing EndForEachIndex();
-        Assert.Throws<ArgumentException>(() => writer.BeginForEachIndex(1) );
+        Assert.Throws<ArgumentException>(() => writer.BeginForEachIndex(1));
 
         stream.Dispose();
     }
@@ -284,14 +288,13 @@ public class NativeStreamTests
 
         stream.Dispose();
     }
-    
-    
+
     [Test]
     public void CopyWriterByValueThrows()
     {
         var stream = new NativeStream(1, Allocator.Temp);
         var writer = stream.AsWriter();
-        
+
         writer.BeginForEachIndex(0);
 
         Assert.Throws<ArgumentException>(() =>
@@ -306,7 +309,7 @@ public class NativeStreamTests
             writerCopy.BeginForEachIndex(1);
             writerCopy.Write(5);
         });
-        
+
         stream.Dispose();
     }
 
@@ -315,38 +318,39 @@ public class NativeStreamTests
     {
         var stream = new NativeStream(1, Allocator.Temp);
         var writer = stream.AsWriter();
-        
+
         writer.BeginForEachIndex(0);
         writer.Write(1);
         writer.EndForEachIndex();
-        
+
         Assert.Throws<ArgumentException>(() =>
         {
             writer.BeginForEachIndex(0);
             writer.Write(2);
         });
-        
+
         stream.Dispose();
-    }    
-    
+    }
+
     struct ManagedRef
     {
         string Value;
     }
-    [Test]
+    [Test, DotsRuntimeIgnore]
     public void WriteManagedThrows()
     {
         var stream = new NativeStream(1, Allocator.Temp);
         var writer = stream.AsWriter();
-        
+
         writer.BeginForEachIndex(0);
 
         Assert.Throws<ArgumentException>(() =>
         {
             writer.Write(new ManagedRef());
         });
-        
+
         stream.Dispose();
     }
+
 #endif
 }

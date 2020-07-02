@@ -1,14 +1,17 @@
-﻿using UnityEngine;
+using UnityEngine;
 using NUnit.Framework;
 using System;
 using Unity.Jobs;
+using Unity.Burst;
 using Unity.Collections;
+using Unity.Collections.Tests;
 
 #pragma warning disable 0219
 #pragma warning disable 0414
 
-public class NativeListJobDebuggerTests
+internal class NativeListJobDebuggerTests
 {
+    [BurstCompile(CompileSynchronously = true)]
     struct NativeListAddJob : IJob
     {
         NativeList<int> list;
@@ -21,6 +24,7 @@ public class NativeListJobDebuggerTests
         }
     }
 
+    [BurstCompile(CompileSynchronously = true)]
     struct NativeArrayTest : IJob
     {
         NativeArray<int> array;
@@ -32,7 +36,7 @@ public class NativeListJobDebuggerTests
         }
     }
 
-    [Test]
+    [Test, DotsRuntimeIgnore]
     public void AddElementToListFromJobInvalidatesArray()
     {
         var list = new NativeList<int>(Allocator.TempJob);
@@ -44,16 +48,16 @@ public class NativeListJobDebuggerTests
         var jobData = new NativeListAddJob(list);
         var job = jobData.Schedule();
 
-        Assert.Throws<System.InvalidOperationException>(() => { Debug.Log(arrayBeforeSchedule[0]); });
-        Assert.Throws<System.InvalidOperationException>(() => { NativeArray<int> array = list; Debug.Log(array.Length); });
-        Assert.Throws<System.InvalidOperationException>(() => { Debug.Log(list.Capacity); });
-        Assert.Throws<System.InvalidOperationException>(() => { list.Dispose(); });
-        Assert.Throws<System.InvalidOperationException>(() => { Debug.Log(list[0]); });
+        Assert.Throws<InvalidOperationException>(() => { Debug.Log(arrayBeforeSchedule[0]); });
+        Assert.Throws<InvalidOperationException>(() => { NativeArray<int> array = list; Debug.Log(array.Length); });
+        Assert.Throws<InvalidOperationException>(() => { Debug.Log(list.Capacity); });
+        Assert.Throws<InvalidOperationException>(() => { list.Dispose(); });
+        Assert.Throws<InvalidOperationException>(() => { Debug.Log(list[0]); });
 
         job.Complete();
 
         Assert.AreEqual(1, arrayBeforeSchedule.Length);
-        Assert.Throws<System.InvalidOperationException>(() => { Debug.Log(arrayBeforeSchedule[0]); });
+        Assert.Throws<InvalidOperationException>(() => { Debug.Log(arrayBeforeSchedule[0]); });
 
         Assert.AreEqual(2, list.Length);
         Assert.AreEqual(0, list[0]);
@@ -67,31 +71,31 @@ public class NativeListJobDebuggerTests
         list.Dispose();
     }
 
-    [Test]
+    [Test, DotsRuntimeIgnore]
     public void AccessBefore()
     {
         var list = new NativeList<int>(Allocator.TempJob);
 
         var jobHandle = new NativeListAddJob(list).Schedule();
-        Assert.Throws<System.InvalidOperationException>(() =>
+        Assert.Throws<InvalidOperationException>(() =>
         {
-           list.AsArray();
+            list.AsArray();
         });
 
         jobHandle.Complete();
         list.Dispose();
     }
 
-    [Test]
+    [Test, DotsRuntimeIgnore]
     public void AccessAfter()
     {
         var list = new NativeList<int>(Allocator.TempJob);
         var array = list.AsArray();
         var jobHandle = new NativeListAddJob(list).Schedule();
-        Assert.Throws<System.InvalidOperationException>(() =>
-       {
-           new NativeArrayTest(array).Schedule(jobHandle);
-       });
+        Assert.Throws<InvalidOperationException>(() =>
+        {
+            new NativeArrayTest(array).Schedule(jobHandle);
+        });
         jobHandle.Complete();
 
         list.Dispose();
@@ -114,21 +118,21 @@ public class NativeListJobDebuggerTests
         list.Dispose(writeJobHandle);
     }
 
-    [Test]
+    [Test, DotsRuntimeIgnore]
     public void ScheduleDerivedArrayExceptions()
     {
         var list = new NativeList<int>(1, Allocator.Persistent);
 
         var addListJobHandle = new NativeListAddJob(list).Schedule();
 #pragma warning disable 0219 // assigned but its value is never used
-        Assert.Throws<System.InvalidOperationException>(() => { NativeArray<int> array = list; });
+        Assert.Throws<InvalidOperationException>(() => { NativeArray<int> array = list; });
 #pragma warning restore 0219
 
         addListJobHandle.Complete();
         list.Dispose();
     }
 
-    [Test]
+    [Test, DotsRuntimeIgnore]
     public void ScheduleDerivedArrayExceptions2()
     {
         var list = new NativeList<int>(1, Allocator.Persistent);
@@ -137,14 +141,13 @@ public class NativeListJobDebuggerTests
         var addListJobHandle = new NativeListAddJob(list).Schedule();
         // The array previously cast should become invalid
         // as soon as the job is scheduled, since we can't predict if an element will be added or not
-        Assert.Throws<System.InvalidOperationException>(() => { new NativeArrayTest(array).Schedule(); });
+        Assert.Throws<InvalidOperationException>(() => { new NativeArrayTest(array).Schedule(); });
 
         addListJobHandle.Complete();
         list.Dispose();
     }
 
-
-
+    [BurstCompile(CompileSynchronously = true)]
     struct ReadOnlyListAccess : IJob
     {
         [ReadOnly]
@@ -173,7 +176,6 @@ public class NativeListJobDebuggerTests
         list.Dispose();
     }
 
-
     [Test]
     public void AsArrayJobKeepsAsArrayValid()
     {
@@ -190,7 +192,7 @@ public class NativeListJobDebuggerTests
         list.Dispose();
     }
 
-
+    [BurstCompile(CompileSynchronously = true)]
     struct NativeListToArrayConversionFromJob : IJob
     {
         public NativeList<int> list;
@@ -217,6 +219,7 @@ public class NativeListJobDebuggerTests
         jobData.list.Dispose();
     }
 
+    [BurstCompile(CompileSynchronously = true)]
     struct WriteJob : IJobParallelFor
     {
         public NativeArray<float> output;
@@ -227,7 +230,7 @@ public class NativeListJobDebuggerTests
         }
     }
 
-    [Test]
+    [Test, DotsRuntimeIgnore]
     public void WriteToArrayFromJobThenReadListFromMainThread()
     {
         var list = new NativeList<float>(1, Allocator.Persistent);
@@ -247,9 +250,8 @@ public class NativeListJobDebuggerTests
         list.Dispose();
     }
 
-
     [Test]
-    public void DisposeJobWorks()
+    public void NativeList_DisposeJob()
     {
         var list = new NativeList<int>(Allocator.Persistent);
         var deps = new NativeListAddJob(list).Schedule();
@@ -258,25 +260,27 @@ public class NativeListJobDebuggerTests
         deps.Complete();
     }
 
-    [Test]
-    public void DisposeJobWithMissingDependencyThrows()
+    [Test, DotsRuntimeIgnore]
+    public void NativeList_DisposeJobWithMissingDependencyThrows()
     {
         var list = new NativeList<int>(Allocator.Persistent);
         var deps = new NativeListAddJob(list).Schedule();
-        Assert.Throws<InvalidOperationException>(() => { list.Dispose(default(JobHandle)); });
+        Assert.Throws<InvalidOperationException>(() => { list.Dispose(default); });
         deps.Complete();
         list.Dispose();
     }
 
-    [Test]
-    public void DisposeJobListCantBeScheduled()
+    [Test, DotsRuntimeIgnore]
+    public void NativeList_DisposeJobCantBeScheduled()
     {
         var list = new NativeList<int>(Allocator.Persistent);
-        var deps = list.Dispose(default(JobHandle));
+        var deps = list.Dispose(default);
         Assert.Throws<InvalidOperationException>(() => { new NativeListAddJob(list).Schedule(deps); });
         deps.Complete();
     }
 
+    // error BC1071: Unsupported assert type
+    // [BurstCompile(CompileSynchronously = true)]
     struct InvalidArrayAccessFromListJob : IJob
     {
         public NativeList<int> list;
@@ -298,16 +302,34 @@ public class NativeListJobDebuggerTests
         job.list.Dispose();
     }
 
+#if UNITY_2020_2_OR_NEWER
     [Test]
-    public void DisposeAliasedArrayThrows()
+    public void DisposeAliasedArrayDoesNotThrow()
     {
         var list = new NativeList<int>(Allocator.Persistent);
         var array = list.AsArray();
+        Assert.DoesNotThrow(() => { array.Dispose(); });
+
+        list.Dispose();
+    }
+
+#else
+    [Test]
+    public void DisposingNativeListDerivedArrayThrows()
+    {
+        var list = new NativeList<int>(Allocator.Persistent);
+        list.Add(1);
+
+        NativeArray<int> array = list;
         Assert.Throws<InvalidOperationException>(() => { array.Dispose(); });
 
         list.Dispose();
     }
 
+#endif
+
+    // Burst error BC1071: Unsupported assert type
+    // [BurstCompile(CompileSynchronously = true)]
     struct NativeArrayTestReadOnly : IJob
     {
         [ReadOnly]
@@ -333,6 +355,8 @@ public class NativeListJobDebuggerTests
         list.Dispose();
     }
 
+    // Burst error BC1071: Unsupported assert type
+    // [BurstCompile(CompileSynchronously = true)]
     struct NativeArrayTestWriteOnly : IJob
     {
         [WriteOnly]
@@ -349,15 +373,15 @@ public class NativeListJobDebuggerTests
     }
 
     [Test]
-    public void AsParallel()
+    public void NativeList_AsArray_Jobs()
     {
         var list = new NativeList<int>(Allocator.Persistent);
         list.Add(0);
 
-        var writer = list.AsParallelWriter();
+        var writer = list.AsArray();
         var writerJob = new NativeArrayTestWriteOnly(writer).Schedule();
 
-        var reader = list.AsParallelReader();
+        var reader = list.AsArray();
         var readerJob = new NativeArrayTestReadOnly(reader).Schedule(writerJob);
 
         // Tests that read only container safety check trows...
@@ -370,4 +394,89 @@ public class NativeListJobDebuggerTests
 
         list.Dispose();
     }
+
+#if UNITY_2020_1_OR_NEWER
+    // Burst error BC1071: Unsupported assert type
+    // [BurstCompile(CompileSynchronously = true)]
+    struct NativeListTestParallelReader : IJob
+    {
+        [ReadOnly]
+        public NativeArray<int>.ReadOnly reader;
+
+        public void Execute()
+        {
+            Assert.True(reader.Contains(7));
+            Assert.AreEqual(7, reader[0]);
+        }
+    }
+
+    [Test]
+    public void NativeList_ParallelReader()
+    {
+        NativeList<int> list;
+        JobHandle readerJob;
+
+        {
+            list = new NativeList<int>(Allocator.Persistent);
+            list.Add(7);
+
+            var reader = list.AsParallelReader();
+            list.Dispose(); // <- cause invalid use
+            Assert.Throws<InvalidOperationException>(() => { readerJob = new NativeListTestParallelReader { reader = reader }.Schedule(); });
+        }
+
+        {
+            list = new NativeList<int>(Allocator.Persistent);
+            list.Add(7);
+
+            var reader = list.AsParallelReader();
+            readerJob = new NativeListTestParallelReader { reader = reader }.Schedule();
+        }
+
+        list.Dispose(readerJob);
+        readerJob.Complete();
+    }
+
+    [BurstCompile(CompileSynchronously = true)]
+    struct NativeListTestParallelWriter : IJob
+    {
+        [WriteOnly]
+        public NativeList<int>.ParallelWriter writer;
+
+        public void Execute()
+        {
+            writer.AddNoResize(7);
+        }
+    }
+
+    [Test]
+    public void NativeList_ParallelWriter()
+    {
+        NativeList<int> list;
+
+        {
+            list = new NativeList<int>(Allocator.Persistent);
+            var writer = list.AsParallelWriter();
+            list.Dispose(); // <- cause invalid use
+            Assert.Throws<InvalidOperationException>(() =>
+            {
+                var writerJob = new NativeListTestParallelWriter { writer = writer }.Schedule();
+                writerJob.Complete();
+            });
+        }
+
+        {
+            list = new NativeList<int>(Allocator.Persistent);
+            var writer = list.AsParallelWriter();
+            var writerJob = new NativeListTestParallelWriter { writer = writer }.Schedule();
+            writerJob.Complete();
+        }
+
+        Assert.AreEqual(1, list.Length);
+        Assert.AreEqual(7, list[0]);
+
+        list.Dispose();
+    }
+
+#endif
 }
